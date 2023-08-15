@@ -21,13 +21,14 @@ const IGNORED_TASK_DEFINITION_ATTRIBUTES = [
 ];
 
 // Deploy to a service that uses the 'ECS' deployment controller
-async function updateEcsService(ecs, clusterName, service, taskDefArn, waitForService, waitForMinutes, forceNewDeployment) {
+async function updateEcsService(ecs, clusterName, service, taskDefArn, waitForService, waitForMinutes, forceNewDeployment, capacityProviderStrategy) {
   core.debug('Updating the service');
   await ecs.updateService({
     cluster: clusterName,
     service: service,
     taskDefinition: taskDefArn,
-    forceNewDeployment: forceNewDeployment
+    forceNewDeployment: forceNewDeployment, 
+    capacityProviderStrategy: capacityProviderStrategy,
   }).promise();
 
   const consoleHostname = aws.config.region.startsWith('cn') ? 'console.amazonaws.cn' : 'console.aws.amazon.com';
@@ -269,6 +270,8 @@ async function run() {
     const forceNewDeployInput = core.getInput('force-new-deployment', { required: false }) || 'false';
     const forceNewDeployment = forceNewDeployInput.toLowerCase() === 'true';
 
+    const capacityProviderStrategy = core.getInput('capacity-provider-strategy', {required: false});
+
     // Register the task definition
     core.debug('Registering the task definition');
     const taskDefPath = path.isAbsolute(taskDefinitionFile) ?
@@ -308,9 +311,26 @@ async function run() {
         throw new Error(`Service is ${serviceResponse.status}`);
       }
 
+      let capacityProviderStrategies;
+
+      if (capacityProviderStrategy) {
+        capacityProviderStrategies = capacityProviderStrategy.split('\n')
+          .map(p => {
+            return '{"' + p.replace(/=/g, '": "').replace(/,/g, '","') + '"}'
+          })
+          .map(p => JSON.parse(p))
+          .map(item => (
+            {
+              "capacityProvider": item.capacityProvider,
+              "weight": parseInt(item.weight) ? parseInt(item.weight) : item.weight,
+              "base": parseInt(item.base) ? parseInt(item.base) : item.base
+            }
+          ));
+      }
+
       if (!serviceResponse.deploymentController || !serviceResponse.deploymentController.type || serviceResponse.deploymentController.type === 'ECS') {
         // Service uses the 'ECS' deployment controller, so we can call UpdateService
-        await updateEcsService(ecs, clusterName, service, taskDefArn, waitForService, waitForMinutes, forceNewDeployment);
+        await updateEcsService(ecs, clusterName, service, taskDefArn, waitForService, waitForMinutes, forceNewDeployment, capacityProviderStrategies);
       } else if (serviceResponse.deploymentController.type === 'CODE_DEPLOY') {
         // Service uses CodeDeploy, so we should start a CodeDeploy deployment
         await createCodeDeployDeployment(codedeploy, clusterName, service, taskDefArn, waitForService, waitForMinutes);

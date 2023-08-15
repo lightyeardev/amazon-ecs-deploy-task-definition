@@ -692,6 +692,7 @@ describe('Deploy to ECS', () => {
             .mockReturnValueOnce('false')               // wait-for-service-stability
             .mockReturnValueOnce('')                    // wait-for-minutes
             .mockReturnValueOnce('')                    // force-new-deployment
+            .mockReturnValueOnce('')                    // capacity-provider-strategy
             .mockReturnValueOnce('/hello/appspec.json') // codedeploy-appspec
             .mockReturnValueOnce('MyApplication')       // codedeploy-application
             .mockReturnValueOnce('MyDeploymentGroup');  // codedeploy-deployment-group
@@ -1032,6 +1033,35 @@ describe('Deploy to ECS', () => {
             cluster: 'cluster-789',
             service: 'service-456',
             taskDefinition: 'task:def:arn',
+            forceNewDeployment: true
+        });
+    });
+
+    test('capacity provider strategy', async () => {
+        core.getInput = jest
+            .fn()
+            .mockReturnValueOnce('task-definition.json')  // task-definition
+            .mockReturnValueOnce('service-456')          // service
+            .mockReturnValueOnce('cluster-789')          // cluster
+            .mockReturnValueOnce('false')                // wait-for-service-stability
+            .mockReturnValueOnce('')                     // wait-for-minutes
+            .mockReturnValueOnce('true')                  // force-new-deployment
+            .mockReturnValueOnce('capacityProvider=FARGATE,weight=3,base=2\ncapacityProvider=FARGATE_SPOT,weight=1');                  // capacity-provider-strategy
+
+        await run();
+        expect(core.setFailed).toHaveBeenCalledTimes(0);
+
+        expect(mockEcsRegisterTaskDef).toHaveBeenNthCalledWith(1, { family: 'task-def-family'});
+        expect(core.setOutput).toHaveBeenNthCalledWith(1, 'task-definition-arn', 'task:def:arn');
+        expect(mockEcsDescribeServices).toHaveBeenNthCalledWith(1, {
+            cluster: 'cluster-789',
+            services: ['service-456']
+        });
+        expect(mockEcsUpdateService).toHaveBeenNthCalledWith(1, {
+            cluster: 'cluster-789',
+            service: 'service-456',
+            taskDefinition: 'task:def:arn',
+            capacityProviderStrategy: [{capacityProvider: 'FARGATE', weight: 3, base: 2}, {capacityProvider: 'FARGATE_SPOT', weight: 1}],
             forceNewDeployment: true
         });
     });
